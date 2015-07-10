@@ -47,7 +47,6 @@ object MyFreeGrammar {
     val free: DBFree[Throwable \/ A] = Free.liftF(a)
     EitherT.eitherT(free)
   }
-  def liftToEitherT[A](a: DBFree[Throwable \/ A]): DBProg[A] = EitherT.eitherT(a)
 
   def getDoc(key: Key): DBProg[DbValue] = liftToFreeEitherT(GetDoc(key, d => d))
   def createDoc(k: Key, doc: JsonString): DBProg[Unit] = liftToFreeEitherT(CreateDoc(k, doc, d => d))
