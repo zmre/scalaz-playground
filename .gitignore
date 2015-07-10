@@ -41,3 +41,5 @@ tmp
 .cache-tests
 data
 workbench.xmi
+*.sublime-workspace
+*.sublime-project

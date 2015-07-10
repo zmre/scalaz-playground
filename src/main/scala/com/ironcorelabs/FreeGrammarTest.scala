@@ -22,6 +22,8 @@ object MyFreeGrammar {
   def genHashVer(s: JsonString): HashVerString =
     HashVerString(scala.util.hashing.MurmurHash3.stringHash(s.s).toString)
 
+  def liftIntoDBFree[A](either: Throwable \/ A): DBProg[A] = EitherT.eitherT(Monad[DBFree].point(either))
+
   // 1. ADT
   sealed trait DBOps[+Next]
   case class GetDoc[Next](key: Key, nextF: Throwable \/ DbValue => Next) extends DBOps[Next]
