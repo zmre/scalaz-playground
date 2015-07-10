@@ -26,7 +26,7 @@ class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatcher
     }
     "fail fetching a doc that doesn't exist" in {
       val testRead = getDoc(k)
-      val res:DbFetchResult = DBInterpreterMemory(testRead)
+      val res = DBInterpreterMemory(testRead)
       res should be (left)
     }
     "create a doc that doesn't exist" in {

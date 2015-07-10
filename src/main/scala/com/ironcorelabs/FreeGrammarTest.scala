@@ -15,8 +15,9 @@ object MyFreeGrammar {
   final case class Key(k: String) extends AnyVal
   final case class JsonString(s: String) extends AnyVal
   final case class HashVerString(s: String) extends AnyVal
-  type DbFetchResult = Throwable \/ (JsonString, HashVerString)
-  type DbSaveResult = Throwable \/ Unit
+  type DbValue = (JsonString, HashVerString)
+  type DBFree[A] = Free[DBOps, A]
+  type EDBProg[A] = EitherT[DBFree, Throwable, A]
 
   def genHashVer(s: JsonString): HashVerString =
     HashVerString(scala.util.hashing.MurmurHash3.stringHash(s.s).toString)
@@ -67,8 +68,8 @@ object MyFreeGrammar {
 
   // 1. ADT
   sealed trait DBOps[+Next]
-  case class GetDoc[Next](key: Key, nextF: DbFetchResult => Next) extends DBOps[Next]
-  case class CreateDoc[Next, B](key: Key, doc: JsonString, nextF: DbSaveResult => Next) extends DBOps[Next]
+  case class GetDoc[Next](key: Key, nextF: Throwable \/ DbValue => Next) extends DBOps[Next]
+  case class CreateDoc[Next, B](key: Key, doc: JsonString, nextF: Throwable \/ Unit => Next) extends DBOps[Next]
   case class UpdateDoc[Next, B](key: Key, doc: JsonString, hashver: HashVerString, next: Next) extends DBOps[Next]
   case class RemoveKey[Next](key: Key, next: Next) extends DBOps[Next]
   // case class GetCounter[A](key: String, next: A) extends DBOps[A]
@@ -87,32 +88,37 @@ object MyFreeGrammar {
   }
 
   // 3. Lifting functions / free monad magic
-  type DBProg[A] = Free[DBOps, A]
+  def liftToFreeEitherT[A](a: DBOps[Throwable \/ A]): EDBProg[A] = {
+    val free: DBFree[Throwable \/ A] = Free.liftF(a)
+    EitherT.eitherT(free)
+  }
+  def liftToEitherT[A](a: DBFree[Throwable \/ A]): EDBProg[A] = EitherT.eitherT(a)
   // def getAccount(key: String): DBProg[Throwable \/ DBAccount] = Free.liftF(
     // GetDoc(key, (doc: Throwable \/ DBAccount) => doc)
     // GetDoc(key, identity)
   // )
   // def createAccount(doc: DBAccount): DBProg[Throwable \/ DBAccount] = Free.liftF(CreateDoc(doc, ().right))
   // def getDoc[A](key: Key): DBProg[DbFetchResult] = Free.liftF(GetDoc(key, (d:DbFetchResult) => d.map(())))
-  def getDoc(key: Key): DBProg[DbFetchResult] = Free.liftF(GetDoc(key, (d:DbFetchResult) => d))
-  def createDoc(k: Key, doc: JsonString): DBProg[DbSaveResult] = Free.liftF(CreateDoc(k, doc, (r:DbSaveResult) => r))
-  def updateDoc(k: Key, doc: JsonString, hashver: HashVerString): DBProg[DbSaveResult]  = Free.liftF(UpdateDoc(k, doc, hashver, ().right))
-  def removeKey(k: Key): DBProg[DbSaveResult]  = Free.liftF(RemoveKey(k, ().right))
-  def createAndRead(k: Key, v: JsonString): DBProg[DbFetchResult] = for {
+  def getDoc(key: Key): EDBProg[DbValue] = liftToFreeEitherT(GetDoc(key, d => d))
+  def createDoc(k: Key, doc: JsonString): EDBProg[Unit] = liftToFreeEitherT(CreateDoc(k, doc, d => d))
+  def updateDoc(k: Key, doc: JsonString, hashver: HashVerString): EDBProg[Unit]  =
+    liftToFreeEitherT(UpdateDoc(k, doc, hashver, ().right))
+  def removeKey(k: Key): EDBProg[Unit]  = liftToFreeEitherT(RemoveKey(k, ().right))
+  def createAndRead(k: Key, v: JsonString): EDBProg[DbValue] = for {
     _ <- createDoc(k, v)
     d <- getDoc(k)
   } yield d
 
-  def modifyDoc(k: Key, f: JsonString => JsonString): DBProg[DbSaveResult] = for {
-    doc <- getDoc(k)
-  } yield doc.map { case (jsonString, hashVersion) =>
-    updateDoc(k, f(jsonString), hashVersion)
-  }
+  def modifyDoc(k: Key, f: JsonString => JsonString): EDBProg[Unit] = for {
+    t <- getDoc(k)
+    (jsonString, hashVersion) = t
+    res <- updateDoc(k, f(jsonString), hashVersion)
+  } yield res
 
   type KVMap = Map[Key, JsonString]
   object DBInterpreterMemory {
-    def apply[A](prog: DBProg[A], m: KVMap = Map()): A = run(prog, m)._2
-    def run[A](prog: DBProg[A], m: KVMap = Map()): (KVMap, A) = prog.foldRun(m) { (m, op) => op match {
+    def apply[A](prog: EDBProg[A], m: KVMap = Map()): Throwable \/ A = run(prog, m)._2
+    def run[A](prog: EDBProg[A], m: KVMap = Map()): (KVMap, Throwable \/ A) = prog.run.foldRun(m) { (m, op) => op match {
         case GetDoc(k, nextF) => {
           val jsonO:Option[JsonString] = m.get(k)
           val ret = jsonO match {
