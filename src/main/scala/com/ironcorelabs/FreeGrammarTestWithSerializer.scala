@@ -69,17 +69,9 @@ object FreeGrammarTestWithSerializer {
    * getDoc(k) returns DBProg[DbValue]
    */
 
-  // def getAccount(k: Key): DBProg[DBAccount] = for {
-    // t <- getDoc(k)
-    // (jsonString, hashVersion) = t
-    // account <- DBAccount.fromJson(jsonString)
-  // } yield DBAccount(Some(k), account, Some(hashVersion))
-
-  // def getAccount(k: Key): DBProg[DBAccount] =
-    // getDoc(k).map { a:DbValue =>
-      // val (jsonString, hashVersion) = a
-      // DBAccount.fromJson(jsonString).map(account =>
-        // DBAccount(Some(k), account, Some(hashVersion))
-      // )
-    // }
+  def getAccount(k: Key): DBProg[DBAccount] = for {
+    t <- getDoc(k)
+    (jsonString, hashVersion) = t
+    account <- liftIntoDBFree(DBAccount.fromJson(jsonString))
+  } yield DBAccount(Some(k), account, Some(hashVersion))
 }
