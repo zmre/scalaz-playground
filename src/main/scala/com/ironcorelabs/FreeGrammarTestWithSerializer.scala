@@ -27,8 +27,8 @@ object FreeGrammarTestWithSerializer {
   case class Account(id: Int, userName: String, fullName: String)
 
   case class DBAccount(key: Option[Key], record: Account, hashver: Option[HashVerString]) extends DBDocument[Account] {
-      def genKey: Throwable \/ Key = Key("account_" + record.id).right
-      def toJson: Throwable \/ JsonString = JsonString(s"""
+    def genKey: Throwable \/ Key = Key("account_" + record.id).right
+    def toJson: Throwable \/ JsonString = JsonString(s"""
         {
           "id": "${genKey}",
           "userName": "${record.userName}",

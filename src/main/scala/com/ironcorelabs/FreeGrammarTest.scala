@@ -16,9 +16,9 @@ object MyFreeGrammar {
   final case class JsonString(s: String) extends AnyVal
   final case class HashVerString(s: String) extends AnyVal
   type DbValue = (JsonString, HashVerString)
-  type DBFree[A] = Free[DBOps, A]
+  type DBFree[A] = Free.FreeC[DBOps, A]
   type DBProg[A] = EitherT[DBFree, Throwable, A]
-
+  implicit val MonadDBFree: Monad[DBFree] = Free.freeMonad[({ type l[a] = Coyoneda[DBOps, a] })#l]
   def genHashVer(s: JsonString): HashVerString =
     HashVerString(scala.util.hashing.MurmurHash3.stringHash(s.s).toString)
 
@@ -26,35 +26,23 @@ object MyFreeGrammar {
 
   // 1. ADT
   sealed trait DBOps[+Next]
-  case class GetDoc[Next](key: Key, nextF: Throwable \/ DbValue => Next) extends DBOps[Next]
-  case class CreateDoc[Next, B](key: Key, doc: JsonString, nextF: Throwable \/ Unit => Next) extends DBOps[Next]
-  case class UpdateDoc[Next, B](key: Key, doc: JsonString, hashver: HashVerString, nextF: Throwable \/ Unit => Next) extends DBOps[Next]
-  case class RemoveKey[Next](key: Key, nextF: Throwable \/ Unit => Next) extends DBOps[Next]
+  case class GetDoc[Next](key: Key) extends DBOps[Throwable \/ DbValue]
+  case class CreateDoc[Next, B](key: Key, doc: JsonString) extends DBOps[Throwable \/ Unit]
+  case class UpdateDoc[Next, B](key: Key, doc: JsonString, hashver: HashVerString) extends DBOps[Throwable \/ Unit]
+  case class RemoveKey[Next](key: Key) extends DBOps[Throwable \/ Unit]
   // case class GetCounter[A](key: String, next: A) extends DBOps[A]
   // case class IncrementCounter[A](key: String, delta: Long, next: A) extends DBOps[A]
 
-  // 2. Functor for ADT
-  implicit val dbOps2Functor: scalaz.Functor[DBOps] = new scalaz.Functor[DBOps] {
-    def map[A,B](a: DBOps[A])(f: A => B): DBOps[B] = a match {
-      // case GetDoc(k, nextF) => GetDoc(k, nextF andThen f)
-      case GetDoc(k, nextF) => GetDoc(k, nextF andThen f)
-      case CreateDoc(k, doc, nextF) => CreateDoc(k, doc, nextF andThen f)
-      case UpdateDoc(k, doc, hashver, nextF) => UpdateDoc(k, doc, hashver, nextF andThen f)
-      case RemoveKey(k, nextF) => RemoveKey(k, nextF andThen f)
-    }
-  }
-
   // 3. Lifting functions / free monad magic
   def liftToFreeEitherT[A](a: DBOps[Throwable \/ A]): DBProg[A] = {
-    val free: DBFree[Throwable \/ A] = Free.liftF(a)
+    val free: DBFree[Throwable \/ A] = Free.liftFC(a)
     EitherT.eitherT(free)
   }
 
-  def getDoc(key: Key): DBProg[DbValue] = liftToFreeEitherT(GetDoc(key, d => d))
-  def createDoc(k: Key, doc: JsonString): DBProg[Unit] = liftToFreeEitherT(CreateDoc(k, doc, d => d))
-  def updateDoc(k: Key, doc: JsonString, hashver: HashVerString): DBProg[Unit]  =
-    liftToFreeEitherT(UpdateDoc(k, doc, hashver, d => d))
-  def removeKey(k: Key): DBProg[Unit]  = liftToFreeEitherT(RemoveKey(k, d => d))
+  def getDoc(key: Key): DBProg[DbValue] = liftToFreeEitherT(GetDoc(key))
+  def createDoc(k: Key, doc: JsonString): DBProg[Unit] = liftToFreeEitherT(CreateDoc(k, doc))
+  def updateDoc(k: Key, doc: JsonString, hashver: HashVerString): DBProg[Unit] = liftToFreeEitherT(UpdateDoc(k, doc, hashver))
+  def removeKey(k: Key): DBProg[Unit] = liftToFreeEitherT(RemoveKey(k))
   def createAndRead(k: Key, v: JsonString): DBProg[DbValue] = for {
     _ <- createDoc(k, v)
     d <- getDoc(k)
@@ -68,35 +56,38 @@ object MyFreeGrammar {
 
   type KVMap = Map[Key, JsonString]
   object DBInterpreterMemory {
-    def apply[A](prog: DBProg[A], m: KVMap = Map()): Throwable \/ A = run(prog, m)._2
-    def run[A](prog: DBProg[A], m: KVMap = Map()): (KVMap, Throwable \/ A) = prog.run.foldRun(m) { (m, op) => op match {
-        case GetDoc(k, nextF) => m.get(k).fold {
-            (m, nextF(error(s"No value found for key '${k.k}'")))
-          } { j: JsonString =>
-            (m, nextF((j, genHashVer(j)).right))
+    type KVState[A] = State[KVMap, A]
+
+    def modifyState(s: KVMap): (KVMap, Throwable \/ Unit) = s -> ().right
+    val toKVState: DBOps ~> KVState = new (DBOps ~> KVState) {
+      def apply[A](op: DBOps[A]): KVState[A] = {
+        op match {
+          case GetDoc(k) => State.get.map { _.get(k).map(j => (j -> genHashVer(j)).right).getOrElse(error(s"No value found for key '${k.k}'")) }
+          case UpdateDoc(k, doc, hashver) => State { m: KVMap =>
+            m.get(k).map { j =>
+              val storedhashver = genHashVer(j)
+              if (hashver == storedhashver) {
+                modifyState(m + (k -> doc))
+              } else {
+                m -> error("Someone else updated this doc first")
+              }
+            }.getOrElse(m -> error(s"No value found for key '${k.k}'"))
           }
-        case UpdateDoc(k, doc, hashver, nextF) => m.get(k).fold {
-            (m, nextF(error(s"No value found for key '${k.k}'")))
-          } { j: JsonString =>
-            val storedhashver = genHashVer(j)
-            if (hashver == storedhashver) {
-              ((m + (k -> doc)), nextF(().right))
-            } else {
-              (m, nextF(error("Someone else updated this doc first")))
-            }
+          case CreateDoc(k, doc) => State { m: KVMap =>
+            m.get(k).map(_ => m -> error(s"Can't create since '${k.k}' already exists")).getOrElse(modifyState(m + (k -> doc)))
           }
-        case CreateDoc(k, doc, nextF) => m.get(k).fold {
-            ((m + (k -> doc), nextF(().right)))
-          } { a:JsonString =>
-            (m, nextF(error(s"Can't create since '${k.k}' already exists")))
+          case RemoveKey(k) => State { m: KVMap =>
+            val keyOrError = m.get(k).map(_ => k.right).getOrElse(error("Can't remove non-existent document"))
+            keyOrError.fold(t => m -> t.left, key => modifyState(m - k))
           }
-        case RemoveKey(k, nextF) => m.get(k).fold {
-            (m, nextF(error("Can't remove non-existent document")))
-          } { a: JsonString =>
-            (m - k, nextF(().right))
-          }
+        }
       }
     }
-    private def error(s: String) = (new Exception(s)).left
+
+    def apply[A](prog: DBProg[A], m: KVMap = Map()): Throwable \/ A = run(prog, m)._2
+    def run[A](prog: DBProg[A], m: KVMap = Map()): (KVMap, Throwable \/ A) = {
+      Free.runFC[DBOps, KVState, Throwable \/ A](prog.run)(toKVState).apply(m)
+    }
+    private def error[A](s: String): Throwable \/ A = (new Exception(s)).left
   }
 }
