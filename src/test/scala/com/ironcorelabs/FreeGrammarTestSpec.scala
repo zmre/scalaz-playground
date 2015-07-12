@@ -11,7 +11,6 @@ import DisjunctionValues._
 import scala.language.postfixOps
 import scalaz._
 import Scalaz._
-import scala.collection.mutable.{Map => MutableMap}
 
 class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatchers {
   "FreeGrammarTest" should {
@@ -20,9 +19,9 @@ class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatcher
     val v = JsonString("value")
     val newvalue = JsonString("some other value")
     val hv = genHashVer(v)
+    val seedData = Map(k -> v)
 
     "get a doc that exists" in {
-      val seedData = MutableMap(k -> v)
       val testRead = getDoc(k)
       val res = DBInterpreterMemory(testRead, seedData)
       res.value._1 should === (v)
@@ -33,21 +32,18 @@ class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatcher
       res should be (left)
     }
     "create a doc that doesn't exist" in {
-      val seedData = MutableMap(k -> v)
       val testCreate = createDoc(k, v)
       val (data, res) = DBInterpreterMemory.run(testCreate)
       res should be (right)
       data should equal (seedData)
     }
     "fail to create a doc if it already exists" in {
-      val seedData = MutableMap(k -> v)
       val testCreate = createDoc(k, newvalue)
       val (data, res) = DBInterpreterMemory.run(testCreate, seedData)
       res should be (left)
       data should equal (seedData)
     }
     "update a doc that exists with correct hashver" in {
-      val seedData = MutableMap(k -> v)
       val testUpdate = updateDoc(k, newvalue, hv)
       val (data, res) = DBInterpreterMemory.run(testUpdate, seedData)
       res should be (right)
@@ -57,43 +53,39 @@ class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatcher
       val testUpdate = updateDoc(k, newvalue, hv)
       val (data, res) = DBInterpreterMemory.run(testUpdate)
       res should be (left)
-      data should === (MutableMap():KVMap)
+      data should === (Map():KVMap)
     }
     "fail updating a doc when using incorrect hashver" in {
-      val seedData = MutableMap(k -> v)
       val testUpdate = updateDoc(k, newvalue, HashVerString("badver"))
       val (data, res) = DBInterpreterMemory.run(testUpdate, seedData)
       res should be (left)
       data should === (seedData)
     }
     "remove a key that exists" in {
-      val seedData = MutableMap(k -> v)
       val testRemove = removeKey(k)
       val (data, res) = DBInterpreterMemory.run(testRemove, seedData)
       res should be (right)
-      data should === (MutableMap():KVMap)
+      data should === (Map():KVMap)
     }
     "fail removing a key that doesn't exist" in {
       val testRemove = removeKey(k)
       val (data, res) = DBInterpreterMemory.run(testRemove)
       res should be (left)
-      data should === (MutableMap():KVMap)
+      data should === (Map():KVMap)
     }
     "create and read" in {
-      val seedData =  MutableMap(k -> v)
+      val seedData =  Map(k -> v)
       val testCreateAndRead = createAndRead(k, v)
       val (data, res) = DBInterpreterMemory.run(testCreateAndRead)
       res.value._1 should === (v)
       data should equal (seedData)
     }
     "create and read something that already exists should fail" in {
-      val seedData = MutableMap(k -> v)
       val testCreateAndRead = createAndRead(k, v)
       val (data, res) = DBInterpreterMemory.run(testCreateAndRead, seedData)
       res should be (left)
     }
     "modify map" in {
-      val seedData = MutableMap(k -> v)
       val testModify = modifyDoc(k, j => newvalue)
       val (data, res) = DBInterpreterMemory.run(testModify, seedData)
       res should be (right)
