@@ -20,5 +20,23 @@ libraryDependencies ++= Seq(
   "org.typelevel" %% "scalaz-scalatest" % "0.2.2" % "test"
 )
 
+scalariformSettings
+
+scalacOptions ++= Seq(
+  "-deprecation",
+  "-encoding", "UTF-8", // yes, this is 2 args
+  "-feature",
+  "-unchecked",
+  "-Xfatal-warnings",
+  "-Xlint",
+  "-Yno-adapted-args",
+  "-Ywarn-numeric-widen",
+  "-Ywarn-value-discard",
+  "-Xfuture",
+  "-language:existentials",
+  "-language:higherKinds"
+)
+
+
 
 
