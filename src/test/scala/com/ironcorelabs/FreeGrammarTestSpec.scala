@@ -96,6 +96,5 @@ class FreeGrammarTestSpec extends WordSpec with Matchers with DisjunctionMatcher
       val (data, res) = DBInterpreterMemory.run(testModify)
       res should be(left)
     }
-
   }
 }

@@ -36,7 +36,9 @@ scalacOptions ++= Seq(
   "-Yno-adapted-args",
   "-Ywarn-numeric-widen",
   "-Ywarn-value-discard",
-  "-Xfuture"
+  "-Xfuture",
+  "-language:existentials",
+  "-language:higherKinds"
 )
 
 // A configuration which is like 'compile' except it performs additional static analysis.
